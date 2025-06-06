@@ -51,6 +51,26 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
         self._edit_box = None
         self._selected_overlay = None  # 選択中のテキストボックスindex
         self._drag_offset = QPoint()
+        self._overlay_resizing = False
+        self._overlay_resize_handle = None
+        self._overlay_handle_size = 6
+
+    def _overlay_handle_rects(self, rect: QRect) -> dict:
+        s = self._overlay_handle_size
+        return {
+            "tl": QRect(rect.left() - s, rect.top() - s, s * 2, s * 2),
+            "tr": QRect(rect.right() - s, rect.top() - s, s * 2, s * 2),
+            "bl": QRect(rect.left() - s, rect.bottom() - s, s * 2, s * 2),
+            "br": QRect(rect.right() - s, rect.bottom() - s, s * 2, s * 2),
+        }
+
+    def _overlay_hit_test(self, rect: QRect, pos: QPoint) -> str | None:
+        for name, rc in self._overlay_handle_rects(rect).items():
+            if rc.contains(pos):
+                return name
+        if rect.contains(pos):
+            return "move"
+        return None
 
     def set_scale(self, scale: float):
         """表示倍率を設定 (1.0 = 100%)"""
@@ -132,17 +152,17 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
                 rect_orig, text, font, align, color = item
             elif len(item) == 4:
                 rect_orig, text, font, align = item
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             elif len(item) == 3:
                 rect_orig, text, font = item
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             else:
                 rect_orig, text = item
                 font = painter.font()
                 font.setPointSize(16)
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             rect = QRect(
                 int(rect_orig.x() * self.scale_factor),
                 int(rect_orig.y() * self.scale_factor),
@@ -150,8 +170,9 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
                 int(rect_orig.height() * self.scale_factor),
             )
             painter.setPen(Qt.PenStyle.NoPen)  # 枠線なし
-            painter.setBrush(color)
-            painter.drawRect(rect)
+            if color.alpha() > 0:
+                painter.setBrush(color)
+                painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setFont(font)
             painter.drawText(rect, align, text)
@@ -160,6 +181,9 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
                 painter.setPen(QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
+                for rc in self._overlay_handle_rects(rect).values():
+                    painter.setBrush(QColor(0, 120, 255))
+                    painter.drawRect(rc)
         # 選択範囲描画
         if self.selection.is_active():
             pen = QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine)
@@ -180,9 +204,15 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
                     int(rect_orig.width() * self.scale_factor),
                     int(rect_orig.height() * self.scale_factor),
                 )
-                if rect.contains(event.pos()):
+                hit = self._overlay_hit_test(rect, event.pos())
+                if hit:
                     self._selected_overlay = i
-                    self._drag_offset = event.pos() - rect.topLeft()
+                    if hit == "move":
+                        self._overlay_resizing = False
+                        self._drag_offset = event.pos() - rect.topLeft()
+                    else:
+                        self._overlay_resizing = True
+                        self._overlay_resize_handle = hit
                     self.update()
                     return
             self._selected_overlay = None
@@ -238,14 +268,38 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
                 rect_orig, text, font, align, color = item
             elif len(item) == 4:
                 rect_orig, text, font, align = item
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             else:
                 rect_orig, text, font = item
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
-            new_x = (event.pos().x() - self._drag_offset.x()) / self.scale_factor
-            new_y = (event.pos().y() - self._drag_offset.y()) / self.scale_factor
-            new_rect = QRect(int(new_x), int(new_y), rect_orig.width(), rect_orig.height())
+                color = QColor(0, 0, 0, 0)
+            if self._overlay_resizing and self._overlay_resize_handle:
+                scaled = QRect(
+                    int(rect_orig.x() * self.scale_factor),
+                    int(rect_orig.y() * self.scale_factor),
+                    int(rect_orig.width() * self.scale_factor),
+                    int(rect_orig.height() * self.scale_factor),
+                )
+                r = QRect(scaled)
+                if "l" in self._overlay_resize_handle:
+                    r.setLeft(event.pos().x())
+                if "r" in self._overlay_resize_handle:
+                    r.setRight(event.pos().x())
+                if "t" in self._overlay_resize_handle:
+                    r.setTop(event.pos().y())
+                if "b" in self._overlay_resize_handle:
+                    r.setBottom(event.pos().y())
+                r = r.normalized()
+                new_rect = QRect(
+                    int(r.x() / self.scale_factor),
+                    int(r.y() / self.scale_factor),
+                    int(r.width() / self.scale_factor),
+                    int(r.height() / self.scale_factor),
+                )
+            else:
+                new_x = (event.pos().x() - self._drag_offset.x()) / self.scale_factor
+                new_y = (event.pos().y() - self._drag_offset.y()) / self.scale_factor
+                new_rect = QRect(int(new_x), int(new_y), rect_orig.width(), rect_orig.height())
             self.overlay_texts[self._selected_overlay] = (
                 new_rect, text, font, align, color
             )
@@ -258,6 +312,8 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.selection.end_action()
             self._drag_offset = QPoint()
+            self._overlay_resizing = False
+            self._overlay_resize_handle = None
             self.update()
 
 
@@ -290,7 +346,7 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
             int(rect.height() / self.scale_factor),
         )
         self.overlay_texts.append(
-            (rect_orig, text, edit.font(), edit.alignment(), QColor(255, 255, 255))
+            (rect_orig, text, edit.font(), edit.alignment(), QColor(0, 0, 0, 0))
         )
         edit.deleteLater()
         self._edit_box = None
@@ -338,10 +394,13 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
         else:
             align = align_map.get(align_txt, Qt.AlignmentFlag.AlignCenter)
         color = QColorDialog.getColor(
-            QColor(255, 255, 255), self, "背景色を選択", QColorDialog.ColorDialogOption.ShowAlphaChannel
+            QColor(255, 255, 255, 0),
+            self,
+            "背景色を選択",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )
         if not color.isValid():
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         self.overlay_texts.append((rect, text, font, align, color))
         self.update()
 
@@ -351,11 +410,11 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
             rect, text, font, align, color = item
         elif len(item) == 4:
             rect, text, font, align = item
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         else:
             rect, text, font = item
             align = Qt.AlignmentFlag.AlignCenter
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         new_font, ok = QFontDialog.getFont(font, self, "書体とサイズを変更")
         if not ok:
             return
@@ -390,7 +449,7 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
             QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )
         if not color.isValid():
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         self.overlay_texts[idx] = (new_rect, text, new_font, align, color)
         self.update()
 
@@ -400,14 +459,14 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
             rect, text, font, _, color = item
         elif len(item) == 4:
             rect, text, font, _ = item
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         elif len(item) == 3:
             rect, text, font = item
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         else:
             rect, text = item
             font = QFont()
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         self.overlay_texts[idx] = (rect, text, font, align, color)
         self.update()
 
@@ -422,20 +481,21 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
                 rect, text, font, align, color = item
             elif len(item) == 4:
                 rect, text, font, align = item
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             elif len(item) == 3:
                 rect, text, font = item
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             else:
                 rect, text = item
                 font = painter.font()
                 font.setPointSize(16)
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             painter.setPen(Qt.PenStyle.NoPen)  # 枠線なし
-            painter.setBrush(color)
-            painter.drawRect(rect)
+            if color.alpha() > 0:
+                painter.setBrush(color)
+                painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setFont(font)
             painter.drawText(rect, align, text)
@@ -443,7 +503,6 @@ class PDFPreviewWidget(OverlayEditorMixin, QWidget):
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
         img.save(temp_img.name)
         temp_img.close()
-        from PyQt6.QtPrintSupport import QPrinter
         pdf_path = self.pdf_path if overwrite else None
         if not pdf_path:
             pdf_path, _ = QFileDialog.getSaveFileName(self, "PDFとして保存", "", "PDF Files (*.pdf)")
