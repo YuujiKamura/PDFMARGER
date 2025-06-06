@@ -426,3 +426,18 @@ class PDFThumbnailListViewer(QListWidget):
     # replace_pdf_at_item, insert_pdf_at_item, save_state, load_state
     # ※これらは元の内容でOK（本質的な衝突は上記部分のみ）
 
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.count() == 0:
+            from PyQt6.QtGui import QPainter, QFont, QColor
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+            font = QFont()
+            font.setPointSize(14)
+            painter.setFont(font)
+            painter.setPen(QColor(128, 128, 128))
+            msg = "ファイルメニューからフォルダまたはPDFファイルを選択して下さい"
+            rect = self.viewport().rect()
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, msg)
+            painter.end()
+
