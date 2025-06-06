@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QApplication,
 )
-from PyQt6.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject, QTimer
 import os
 import pprint
 import json
@@ -113,6 +113,7 @@ class PDFThumbnailListViewer(QListWidget):
         self.pdf_list_loaded.connect(self._on_pdf_list_loaded)
         self._workers = []  # ThumbnailWorkerの参照保持用
         self._signals = []  # signalsの参照保持用
+        self._pdf_page_iter = None  # incremental loading iterator
         # ローディングアニメーションウィジェット
         self.loading_widget = LoadingAnimationWidget("サムネイルを読み込み中...", parent=self)
         self.loading_widget.setFixedSize(200, 120)
@@ -205,7 +206,20 @@ class PDFThumbnailListViewer(QListWidget):
     def _on_pdf_list_loaded(self, pdf_page_list):
         self.clear()
         self.page_items = []
-        for idx, (pdf_path, page_num) in enumerate(pdf_page_list):
+        self._pdf_page_iter = iter(pdf_page_list)
+        self._process_page_batch()
+
+    def _process_page_batch(self, batch_size: int = 10):
+        """Process a small batch of pages to keep UI responsive."""
+        if self._pdf_page_iter is None:
+            return
+        for _ in range(batch_size):
+            try:
+                pdf_path, page_num = next(self._pdf_page_iter)
+            except StopIteration:
+                self._pdf_page_iter = None
+                self.hide_loading()
+                return
             info = PDFPageInfo(pdf_path=pdf_path, page_num=page_num)
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, info)
@@ -233,9 +247,8 @@ class PDFThumbnailListViewer(QListWidget):
             self.addItem(item)
             self.setItemWidget(item, widget)
             self.page_items.append((info, item))
-            if idx % 10 == 0:
-                QApplication.processEvents()
-        self.hide_loading()
+        QApplication.processEvents()
+        QTimer.singleShot(0, self._process_page_batch)
 
     def load_all_pages(self):
         self.clear()

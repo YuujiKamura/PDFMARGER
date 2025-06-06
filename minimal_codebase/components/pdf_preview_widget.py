@@ -78,18 +78,14 @@ class PDFPreviewWidget(QWidget):
         if abs(scale - old_scale) < 0.001:
             return
         ratio = scale / old_scale
-        # 選択範囲も倍率に合わせて変換
-        def _scale_rect(rect: QRect) -> QRect:
-            return QRect(
-                int(rect.x() * ratio),
-                int(rect.y() * ratio),
-                int(rect.width() * ratio),
-                int(rect.height() * ratio),
-            )
-
         self.selection.scale(ratio)
         if self._edit_box:
-            box_rect = _scale_rect(self._edit_box.geometry())
+            box_rect = QRect(
+                int(self._edit_box.geometry().x() * ratio),
+                int(self._edit_box.geometry().y() * ratio),
+                int(self._edit_box.geometry().width() * ratio),
+                int(self._edit_box.geometry().height() * ratio),
+            )
             self._edit_box.setGeometry(box_rect)
         self.scale_factor = scale
         self.resize(
@@ -99,26 +95,15 @@ class PDFPreviewWidget(QWidget):
         self.update()
     
     def set_pdf(self, pdf_path):
-        """PDFをセットして表示
-        
-        Args:
-            pdf_path: PDFファイルのパス
-            
-        Returns:
-            bool: PDFの読み込みに成功したかどうか
-        """
+        """PDFをセットして表示"""
         if not pdf_path or not os.path.exists(pdf_path):
             self.pixmap = None
             self.update()
             return False
-        
         try:
-            # PyMuPDFでPDFを開く
             self.doc = fitz.open(pdf_path)
             self.pdf_path = pdf_path
-            
             if len(self.doc) > 0:
-                # 最初のページを表示
                 page = self.doc.load_page(0)
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                 img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
@@ -134,43 +119,30 @@ class PDFPreviewWidget(QWidget):
                 self.overlay_texts = []
                 self.selection = SelectionBox()
                 self.update()
-                
                 return True
             else:
                 self.pixmap = None
                 self.update()
                 return False
-                
         except Exception:
             self.pixmap = None
             self.update()
             return False
     
     def print_preview(self):
-        """現在表示中のPDFを印刷
-        
-        Returns:
-            bool: 印刷に成功したかどうか
-        """
+        """現在表示中のPDFを印刷"""
         if not self.pdf_path or not os.path.exists(self.pdf_path):
             QMessageBox.warning(self, "印刷エラー", "印刷するPDFがありません")
             return False
-        
         try:
             printer = QPrinter(QPrinter.PrinterMode.HighResolution)
             dialog = QPrintDialog(printer, self)
-            
             if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-                # PyMuPDFを使用してPDFを直接印刷
                 from PyQt6.QtCore import QUrl
                 from PyQt6.QtGui import QDesktopServices
-                
-                # デスクトップサービスでPDFを開いて印刷ダイアログを表示
                 QDesktopServices.openUrl(QUrl.fromLocalFile(self.pdf_path))
                 return True
-                
             return False
-            
         except Exception as e:
             QMessageBox.critical(self, "印刷エラー", f"印刷中にエラーが発生しました: {str(e)}")
             return False
@@ -187,6 +159,7 @@ class PDFPreviewWidget(QWidget):
             painter.drawPixmap(0, 0, scaled)
         # 上書きテキスト描画
         for i, item in enumerate(self.overlay_texts):
+            # 旧バージョン（要素数少ないもの）はデフォルト値で補完
             if len(item) >= 5:
                 rect_orig, text, font, align, color = item
             elif len(item) == 4:
@@ -208,18 +181,16 @@ class PDFPreviewWidget(QWidget):
                 int(rect_orig.width() * self.scale_factor),
                 int(rect_orig.height() * self.scale_factor),
             )
-            painter.setPen(Qt.PenStyle.NoPen)  # 枠線なし
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
             painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setFont(font)
             painter.drawText(rect, align, text)
-            # 選択中のみ薄い枠線を表示
             if i == self._selected_overlay:
                 painter.setPen(QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
-        # 選択範囲描画
         if self.selection.is_active():
             pen = QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
@@ -231,7 +202,6 @@ class PDFPreviewWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # テキストボックス選択・移動
             for i, item in enumerate(self.overlay_texts):
                 rect_orig = item[0]
                 rect = QRect(
@@ -249,7 +219,6 @@ class PDFPreviewWidget(QWidget):
             self.selection.begin_action(event.pos())
             self.update()
         elif event.button() == Qt.MouseButton.RightButton:
-            # テキストボックス選択中なら書体変更・削除メニュー
             if self._selected_overlay is not None:
                 menu = QMenu(self)
                 font_action = menu.addAction("書体変更")
@@ -272,7 +241,6 @@ class PDFPreviewWidget(QWidget):
                     self._selected_overlay = None
                     self.update()
                 return
-            # 通常の右クリックメニュー
             menu = QMenu(self)
             if self.selection.is_active():
                 add_text_action = menu.addAction("テキスト追加（サイズ・書体指定）")
@@ -300,7 +268,6 @@ class PDFPreviewWidget(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._selected_overlay is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            # テキストボックス移動
             item = self.overlay_texts[self._selected_overlay]
             if len(item) >= 5:
                 rect_orig, text, font, align, color = item
@@ -314,13 +281,7 @@ class PDFPreviewWidget(QWidget):
             new_x = (event.pos().x() - self._drag_offset.x()) / self.scale_factor
             new_y = (event.pos().y() - self._drag_offset.y()) / self.scale_factor
             new_rect = QRect(int(new_x), int(new_y), rect_orig.width(), rect_orig.height())
-            self.overlay_texts[self._selected_overlay] = (
-                new_rect,
-                text,
-                font,
-                align,
-                color,
-            )
+            self.overlay_texts[self._selected_overlay] = (new_rect, text, font, align, color)
             self.update()
             return
         if self.selection.update_action(event.pos()):
@@ -337,7 +298,6 @@ class PDFPreviewWidget(QWidget):
         if not self.doc or not self.selection.is_active():
             QMessageBox.warning(self, "OCR", "有効な範囲が選択されていません")
             return
-        # 現在ページの画像を取得
         try:
             page = self.doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
@@ -364,7 +324,6 @@ class PDFPreviewWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "OCR", f"画像切り出し・PDF化失敗: {e}")
             return
-        # DocumentAI OCR呼び出しをスレッドで非同期化
         self.setEnabled(False)
         worker = OcrWorker(temp_pdf.name)
         worker.signals.finished.connect(self.on_ocr_finished)
@@ -375,7 +334,7 @@ class PDFPreviewWidget(QWidget):
         if err:
             QMessageBox.warning(self, "OCR", f"OCR失敗: {err}")
             return
-        self._last_ocr_result = pages_dict  # OCR結果を保持
+        self._last_ocr_result = pages_dict
         text = ""
         if pages_dict and "0" in pages_dict:
             text = pages_dict["0"].get("text_only", "")
@@ -384,8 +343,6 @@ class PDFPreviewWidget(QWidget):
             self.apply_ocr_text_to_region(new_text)
 
     def apply_ocr_text_to_region(self, new_text):
-        # OCR結果のバウンディングボックスを利用してテキストボックスを重ねる
-        # 前回のOCR結果を保持しておく（ocr_selected_regionで取得したpages_dictをself._last_ocr_resultに保存）
         pages_dict = getattr(self, '_last_ocr_result', None)
         if not pages_dict or "0" not in pages_dict:
             QMessageBox.warning(self, "OCR", "OCR結果が見つかりません")
@@ -394,15 +351,12 @@ class PDFPreviewWidget(QWidget):
         if not elements:
             QMessageBox.warning(self, "OCR", "OCRボックスが見つかりません")
             return
-        # 最初の要素のバウンディングボックスを使う（複数対応は後続）
         vertices = elements[0].get("normalized_vertices", [])
         if len(vertices) != 4:
             QMessageBox.warning(self, "OCR", "バウンディングボックス情報が不正です")
             return
-        # 画像サイズ取得
         label_w = self.width()
         label_h = self.height()
-        # normalized_verticesをピクセル座標に変換
         xs = [v["x"] for v in vertices]
         ys = [v["y"] for v in vertices]
         min_x = min(xs)
@@ -413,9 +367,7 @@ class PDFPreviewWidget(QWidget):
         y = int(min_y * label_h)
         w = int((max_x - min_x) * label_w)
         h = int((max_y - min_y) * label_h)
-        # 既存の重ねテキストを消す
         self.overlay_texts = []
-        # テキストボックスをOCRボックス範囲に合わせて重ねる
         rect_orig = QRect(
             int(x / self.scale_factor),
             int(y / self.scale_factor),
@@ -467,15 +419,12 @@ class PDFPreviewWidget(QWidget):
         sel = self.selection.rect
         if sel.isNull() or not sel.isValid():
             return
-        # フォント選択ダイアログ
         font, ok = QFontDialog.getFont(QFont("Meiryo", 16), self, "フォントとサイズを選択")
         if not ok:
             return
-        # テキスト入力ダイアログ
         text, ok = QInputDialog.getText(self, "テキスト入力", "追加するテキストを入力:")
         if not ok or not text:
             return
-        # テキスト幅を計算し、必要なら範囲を広げる
         metrics = QFontMetrics(font)
         text_width = metrics.horizontalAdvance(text)
         text_height = metrics.height()
@@ -486,7 +435,7 @@ class PDFPreviewWidget(QWidget):
             int(sel.height() / self.scale_factor),
         )
         if text_width > rect.width():
-            rect.setWidth(text_width + 12)  # 余白
+            rect.setWidth(text_width + 12)
         if text_height > rect.height():
             rect.setHeight(text_height + 8)
         align_items = ["左揃え", "中揃え", "右揃え"]
@@ -529,7 +478,6 @@ class PDFPreviewWidget(QWidget):
         new_font, ok = QFontDialog.getFont(font, self, "書体とサイズを変更")
         if not ok:
             return
-        # テキスト幅・高さ再計算
         metrics = QFontMetrics(new_font)
         text_width = metrics.horizontalAdvance(text)
         text_height = metrics.height()
@@ -586,7 +534,6 @@ class PDFPreviewWidget(QWidget):
         if not self.pixmap:
             QMessageBox.warning(self, "保存", "画像がありません")
             return
-        # 画像＋テキストを合成
         img = self.pixmap.toImage()
         painter = QPainter(img)
         for item in self.overlay_texts:
@@ -605,19 +552,16 @@ class PDFPreviewWidget(QWidget):
                 font.setPointSize(16)
                 align = Qt.AlignmentFlag.AlignCenter
                 color = QColor(255, 255, 255)
-            painter.setPen(Qt.PenStyle.NoPen)  # 枠線なし
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
             painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setFont(font)
             painter.drawText(rect, align, text)
         painter.end()
-        # 一時PNG保存
-        import tempfile
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
         img.save(temp_img.name)
         temp_img.close()
-        # PNG→PDF変換
         from PyQt6.QtPrintSupport import QPrinter
         pdf_path = self.pdf_path if overwrite else None
         if not pdf_path:
@@ -628,7 +572,6 @@ class PDFPreviewWidget(QWidget):
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setOutputFileName(pdf_path)
         painter = QPainter(printer)
-        from PyQt6.QtGui import QImage
         img2 = QImage(temp_img.name)
         rect = painter.viewport()
         size = img2.size()
@@ -637,4 +580,4 @@ class PDFPreviewWidget(QWidget):
         painter.setWindow(img2.rect())
         painter.drawImage(0, 0, img2)
         painter.end()
-        QMessageBox.information(self, "保存", f"PDFを保存しました: {pdf_path}") 
+        QMessageBox.information(self, "保存", f"PDFを保存しました: {pdf_path}")
