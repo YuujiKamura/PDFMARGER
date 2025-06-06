@@ -78,13 +78,16 @@ class PDFPreviewWidget(QWidget):
         if abs(scale - old_scale) < 0.001:
             return
         ratio = scale / old_scale
+
+        # 選択範囲も倍率に合わせて変換
         self.selection.scale(ratio)
         if self._edit_box:
+            box_rect = self._edit_box.geometry()
             box_rect = QRect(
-                int(self._edit_box.geometry().x() * ratio),
-                int(self._edit_box.geometry().y() * ratio),
-                int(self._edit_box.geometry().width() * ratio),
-                int(self._edit_box.geometry().height() * ratio),
+                int(box_rect.x() * ratio),
+                int(box_rect.y() * ratio),
+                int(box_rect.width() * ratio),
+                int(box_rect.height() * ratio),
             )
             self._edit_box.setGeometry(box_rect)
         self.scale_factor = scale
@@ -159,7 +162,7 @@ class PDFPreviewWidget(QWidget):
             painter.drawPixmap(0, 0, scaled)
         # 上書きテキスト描画
         for i, item in enumerate(self.overlay_texts):
-            # 旧バージョン（要素数少ないもの）はデフォルト値で補完
+            # 旧バージョンのデータも受け入れ
             if len(item) >= 5:
                 rect_orig, text, font, align, color = item
             elif len(item) == 4:
@@ -181,16 +184,18 @@ class PDFPreviewWidget(QWidget):
                 int(rect_orig.width() * self.scale_factor),
                 int(rect_orig.height() * self.scale_factor),
             )
-            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)  # 枠線なし
             painter.setBrush(color)
             painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setFont(font)
             painter.drawText(rect, align, text)
+            # 選択中のみ薄い枠線を表示
             if i == self._selected_overlay:
                 painter.setPen(QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
+        # 選択範囲描画
         if self.selection.is_active():
             pen = QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
@@ -281,7 +286,9 @@ class PDFPreviewWidget(QWidget):
             new_x = (event.pos().x() - self._drag_offset.x()) / self.scale_factor
             new_y = (event.pos().y() - self._drag_offset.y()) / self.scale_factor
             new_rect = QRect(int(new_x), int(new_y), rect_orig.width(), rect_orig.height())
-            self.overlay_texts[self._selected_overlay] = (new_rect, text, font, align, color)
+            self.overlay_texts[self._selected_overlay] = (
+                new_rect, text, font, align, color
+            )
             self.update()
             return
         if self.selection.update_action(event.pos()):
@@ -368,6 +375,7 @@ class PDFPreviewWidget(QWidget):
         w = int((max_x - min_x) * label_w)
         h = int((max_y - min_y) * label_h)
         self.overlay_texts = []
+        # テキストボックスをOCRボックス範囲に合わせて重ねる
         rect_orig = QRect(
             int(x / self.scale_factor),
             int(y / self.scale_factor),
@@ -552,7 +560,7 @@ class PDFPreviewWidget(QWidget):
                 font.setPointSize(16)
                 align = Qt.AlignmentFlag.AlignCenter
                 color = QColor(255, 255, 255)
-            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)  # 枠線なし
             painter.setBrush(color)
             painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
