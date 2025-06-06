@@ -164,13 +164,17 @@ class PDFThumbnailMerger(QMainWindow):
 
     def clear_and_save_edit_state(self):
         """
-        作業状態をクリアしてから保存するメニューアクション
+        表示・キャッシュをクリアし、空の状態をデフォルトキャッシュ（last_pdf_edit_state.json）に保存
         """
         try:
             self.viewer.page_items = []
+            self.viewer.pdf_files = []
             self.viewer.clear()
-            self.viewer.save_state()
-            QMessageBox.information(self, "保存", "作業状態をクリアして保存しました")
+            self.viewer.thumbnail_cache.clear()
+            # 空状態をデフォルトキャッシュに保存
+            state_path = get_appdata_path("last_pdf_edit_state.json")
+            self.viewer.save_state(state_path)
+            QMessageBox.information(self, "保存", "作業状態をクリアしてデフォルトキャッシュに保存しました")
         except Exception as e:
             print(f"状態クリア保存失敗: {e}")
             QMessageBox.warning(self, "エラー", "作業状態のクリア保存に失敗しました")
