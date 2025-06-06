@@ -13,7 +13,7 @@ PDFPageInfo = namedtuple('PDFPageInfo', ['pdf_path', 'page_num'])
 class ThumbnailWorkerSignals(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
-    finished = pyqtSignal(object, object, object)  # (pdf_path, page_num, pixmap)
+    finished = pyqtSignal(object, object, object)  # (pdf_path, page_num, image)
 
 class ThumbnailWorker(QRunnable):
     def __init__(self, pdf_path, page_num, thumb_w, thumb_h, callback, signals):
@@ -28,14 +28,13 @@ class ThumbnailWorker(QRunnable):
     def run(self):
         try:
             import fitz
-            from PyQt6.QtGui import QImage, QPixmap
+            from PyQt6.QtGui import QImage
             doc = fitz.open(self.pdf_path)
             page = doc.load_page(self.page_num)
             pix = page.get_pixmap(matrix=fitz.Matrix(0.7, 0.7))
             img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-            pixmap = QPixmap.fromImage(img).scaled(self.thumb_w, self.thumb_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             doc.close()
-            self.signals.finished.emit(self.pdf_path, self.page_num, pixmap)
+            self.signals.finished.emit(self.pdf_path, self.page_num, img)
         except Exception as e:
             print(f"{self.pdf_path} ページ{self.page_num+1} サムネイル生成失敗: {e}")
             self.signals.finished.emit(self.pdf_path, self.page_num, None)
@@ -132,9 +131,16 @@ class PDFThumbnailListViewer(QListWidget):
             print(f"{pdf_path} ページ{page_num+1} サムネイル生成失敗: {e}")
             return None
 
-    def on_thumbnail_ready(self, pdf_path, page_num, pixmap):
+    def on_thumbnail_ready(self, pdf_path, page_num, image):
         key = (pdf_path, page_num)
-        if pixmap is not None:
+        if image is not None:
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap.fromImage(image).scaled(
+                self.thumb_w,
+                self.thumb_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
             self.thumbnail_cache[key] = pixmap
             # UI反映: 対応するitemのラベルにpixmapをセット
             for (info, item) in self.page_items:
