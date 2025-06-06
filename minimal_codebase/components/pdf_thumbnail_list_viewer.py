@@ -1,4 +1,18 @@
-from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QLabel, QAbstractItemView, QDialog, QVBoxLayout, QMessageBox, QWidget, QHBoxLayout, QPushButton, QMenu, QFileDialog
+from PyQt6.QtWidgets import (
+    QListWidget,
+    QListWidgetItem,
+    QLabel,
+    QAbstractItemView,
+    QDialog,
+    QVBoxLayout,
+    QMessageBox,
+    QWidget,
+    QHBoxLayout,
+    QPushButton,
+    QMenu,
+    QFileDialog,
+    QApplication,
+)
 from PyQt6.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import os
 import pprint
@@ -75,6 +89,16 @@ class PDFThumbnailListViewer(QListWidget):
         self.thumb_h = 240
         self.thumbnail_cache = {}  # (pdf_path, page_num) -> QPixmap
         self.thread_pool = QThreadPool()
+        # Limit the thread count so massive thumbnail generations don't
+        # spawn too many concurrent workers which can freeze the UI under
+        # heavy load.
+        try:
+            import os
+            max_workers = max(1, os.cpu_count() // 2)
+            self.thread_pool.setMaxThreadCount(max_workers)
+        except Exception:
+            # Fallback in case os.cpu_count() is not available
+            self.thread_pool.setMaxThreadCount(2)
         self.setViewMode(QListWidget.ViewMode.ListMode)
         self.setIconSize(QSize(self.thumb_w, self.thumb_h))
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -181,7 +205,7 @@ class PDFThumbnailListViewer(QListWidget):
     def _on_pdf_list_loaded(self, pdf_page_list):
         self.clear()
         self.page_items = []
-        for pdf_path, page_num in pdf_page_list:
+        for idx, (pdf_path, page_num) in enumerate(pdf_page_list):
             info = PDFPageInfo(pdf_path=pdf_path, page_num=page_num)
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, info)
@@ -209,6 +233,8 @@ class PDFThumbnailListViewer(QListWidget):
             self.addItem(item)
             self.setItemWidget(item, widget)
             self.page_items.append((info, item))
+            if idx % 10 == 0:
+                QApplication.processEvents()
         self.hide_loading()
 
     def load_all_pages(self):
@@ -386,7 +412,12 @@ class PDFThumbnailListViewer(QListWidget):
                     page = doc.load_page(0)
                     pix = page.get_pixmap(matrix=fitz.Matrix(self.thumb_w/100, self.thumb_h/140))
                     img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-                    pixmap = QPixmap.fromImage(img).scaled(self.thumb_w, self.thumb_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    QPixmap.fromImage(img).scaled(
+                        self.thumb_w,
+                        self.thumb_h,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
                     info = PDFPageInfo(pdf_path=pdf_path, page_num=0)
                     item.setData(Qt.ItemDataRole.UserRole, info)
                     item.setSizeHint(QSize(self.thumb_w + 180, self.thumb_h + 16))
@@ -416,7 +447,12 @@ class PDFThumbnailListViewer(QListWidget):
                     page = doc.load_page(0)
                     pix = page.get_pixmap(matrix=fitz.Matrix(self.thumb_w/100, self.thumb_h/140))
                     img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-                    pixmap = QPixmap.fromImage(img).scaled(self.thumb_w, self.thumb_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    QPixmap.fromImage(img).scaled(
+                        self.thumb_w,
+                        self.thumb_h,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
                     info = PDFPageInfo(pdf_path=pdf_path, page_num=0)
                     new_item = QListWidgetItem()
                     new_item.setData(Qt.ItemDataRole.UserRole, info)
@@ -467,7 +503,7 @@ class PDFThumbnailListViewer(QListWidget):
         self.page_items = []
         self.pdf_files = []  # 復元内容に合わせてpdf_filesもセット
         self.excluded_items = []
-        for entry in state.get("pages", []):
+        for idx, entry in enumerate(state.get("pages", [])):
             pdf_path = entry["pdf_path"]
             page_num = entry["page_num"]
             if pdf_path not in self.pdf_files:
@@ -479,7 +515,12 @@ class PDFThumbnailListViewer(QListWidget):
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(matrix=fitz.Matrix(0.7, 0.7))
                 img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-                pixmap = QPixmap.fromImage(img).scaled(self.thumb_w, self.thumb_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                QPixmap.fromImage(img).scaled(
+                    self.thumb_w,
+                    self.thumb_h,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
                 item = QListWidgetItem()
                 info = PDFPageInfo(pdf_path=pdf_path, page_num=page_num)
                 item.setData(Qt.ItemDataRole.UserRole, info)
@@ -491,7 +532,11 @@ class PDFThumbnailListViewer(QListWidget):
                 doc.close()
             except Exception as e:
                 print(f"{pdf_path} ページ{page_num+1} 復元失敗: {e}")
-        for entry in state.get("excluded", []):
+            if idx % 10 == 0:
+                QApplication.processEvents()
+        for idx, entry in enumerate(state.get("excluded", [])):
             pdf_path = entry["pdf_path"]
             page_num = entry["page_num"]
-            self.excluded_items.append(PDFPageInfo(pdf_path=pdf_path, page_num=page_num)) 
+            self.excluded_items.append(PDFPageInfo(pdf_path=pdf_path, page_num=page_num))
+            if idx % 10 == 0:
+                QApplication.processEvents()

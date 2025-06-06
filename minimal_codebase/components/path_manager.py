@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 import sys
-from typing import Optional
 
 class PathManager:
     """
