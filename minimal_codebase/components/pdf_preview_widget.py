@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QColorDialog,
 )
-from PyQt6.QtCore import Qt, QRect, QPoint, QThreadPool, QRunnable, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QRect, QPoint
 from PyQt6.QtGui import (
     QPixmap,
     QImage,
@@ -25,30 +25,14 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
 )
-from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+from PyQt6.QtPrintSupport import QPrinter
 import fitz
 import os
 import tempfile
 from .selection_box import SelectionBox
+from .overlay_editor_mixin import OverlayEditorMixin
 
-class OcrWorkerSignals(QObject):
-    finished = pyqtSignal(object, object)  # (pages_dict, error)
-
-class OcrWorker(QRunnable):
-    def __init__(self, pdf_path):
-        super().__init__()
-        self.pdf_path = pdf_path
-        self.signals = OcrWorkerSignals()
-    def run(self):
-        try:
-            from ocr_tools.document_ai_ocr import DocumentAIOCR
-            ocr = DocumentAIOCR()
-            pages_dict, err = ocr.extract_ocr_from_pdf(self.pdf_path)
-            self.signals.finished.emit(pages_dict, err)
-        except Exception as e:
-            self.signals.finished.emit(None, str(e))
-
-class PDFPreviewWidget(QWidget):
+class PDFPreviewWidget(OverlayEditorMixin, QWidget):
     """PDFをプレビュー表示するウィジェット（QLabel廃止・自前描画）"""
     
     def __init__(self, parent=None):
@@ -67,7 +51,6 @@ class PDFPreviewWidget(QWidget):
         self._edit_box = None
         self._selected_overlay = None  # 選択中のテキストボックスindex
         self._drag_offset = QPoint()
-        self.thread_pool = QThreadPool()
 
     def set_scale(self, scale: float):
         """表示倍率を設定 (1.0 = 100%)"""
@@ -132,24 +115,6 @@ class PDFPreviewWidget(QWidget):
             self.update()
             return False
     
-    def print_preview(self):
-        """現在表示中のPDFを印刷"""
-        if not self.pdf_path or not os.path.exists(self.pdf_path):
-            QMessageBox.warning(self, "印刷エラー", "印刷するPDFがありません")
-            return False
-        try:
-            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-            dialog = QPrintDialog(printer, self)
-            if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-                from PyQt6.QtCore import QUrl
-                from PyQt6.QtGui import QDesktopServices
-                QDesktopServices.openUrl(QUrl.fromLocalFile(self.pdf_path))
-                return True
-            return False
-        except Exception as e:
-            QMessageBox.critical(self, "印刷エラー", f"印刷中にエラーが発生しました: {str(e)}")
-            return False
-
     def paintEvent(self, event):
         painter = QPainter(self)
         if self.pixmap:
@@ -249,8 +214,6 @@ class PDFPreviewWidget(QWidget):
             menu = QMenu(self)
             if self.selection.is_active():
                 add_text_action = menu.addAction("テキスト追加（サイズ・書体指定）")
-                ocr_action = menu.addAction("選択範囲をOCRして上書き")
-                ocr_action.setEnabled(False)
             zoom_menu = menu.addMenu("表示倍率")
             zoom_actions = {}
             for p in [100, 90, 80, 70, 60, 50]:
@@ -259,11 +222,8 @@ class PDFPreviewWidget(QWidget):
             save_action = menu.addAction("PDFを上書き保存")
             saveas_action = menu.addAction("名前をつけて保存")
             action = menu.exec(self.mapToGlobal(event.pos()))
-            if self.selection.is_active():
-                if action == add_text_action:
-                    self.add_text_box_to_selection()
-                elif action == ocr_action:
-                    self.ocr_selected_region()
+            if self.selection.is_active() and action == add_text_action:
+                self.add_text_box_to_selection()
             if action in zoom_actions:
                 self.set_scale(zoom_actions[action] / 100.0)
             if action == save_action:
@@ -300,93 +260,6 @@ class PDFPreviewWidget(QWidget):
             self._drag_offset = QPoint()
             self.update()
 
-    def ocr_selected_region(self):
-        # 選択範囲の画像を切り出し
-        if not self.doc or not self.selection.is_active():
-            QMessageBox.warning(self, "OCR", "有効な範囲が選択されていません")
-            return
-        try:
-            page = self.doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-            label_geom = self.geometry()
-            scale_x = pix.width / self.width()
-            scale_y = pix.height / self.height()
-            sel = self.selection.rect
-            x = int((sel.left() - label_geom.left()) * scale_x)
-            y = int((sel.top() - label_geom.top()) * scale_y)
-            w = int(sel.width() * scale_x)
-            h = int(sel.height() * scale_y)
-            cropped = img.copy(x, y, w, h)
-            temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-            from PyQt6.QtGui import QPainter
-            from PyQt6.QtPrintSupport import QPrinter
-            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-            printer.setOutputFileName(temp_pdf.name)
-            painter = QPainter(printer)
-            painter.drawImage(0, 0, cropped)
-            painter.end()
-            temp_pdf.close()
-        except Exception as e:
-            QMessageBox.warning(self, "OCR", f"画像切り出し・PDF化失敗: {e}")
-            return
-        self.setEnabled(False)
-        worker = OcrWorker(temp_pdf.name)
-        worker.signals.finished.connect(self.on_ocr_finished)
-        self.thread_pool.start(worker)
-
-    def on_ocr_finished(self, pages_dict, err):
-        self.setEnabled(True)
-        if err:
-            QMessageBox.warning(self, "OCR", f"OCR失敗: {err}")
-            return
-        self._last_ocr_result = pages_dict
-        text = ""
-        if pages_dict and "0" in pages_dict:
-            text = pages_dict["0"].get("text_only", "")
-        new_text, ok = QInputDialog.getText(self, "OCR結果編集", "検出文字列を編集:", text=text)
-        if ok and new_text:
-            self.apply_ocr_text_to_region(new_text)
-
-    def apply_ocr_text_to_region(self, new_text):
-        pages_dict = getattr(self, '_last_ocr_result', None)
-        if not pages_dict or "0" not in pages_dict:
-            QMessageBox.warning(self, "OCR", "OCR結果が見つかりません")
-            return
-        elements = pages_dict["0"].get("elements", [])
-        if not elements:
-            QMessageBox.warning(self, "OCR", "OCRボックスが見つかりません")
-            return
-        vertices = elements[0].get("normalized_vertices", [])
-        if len(vertices) != 4:
-            QMessageBox.warning(self, "OCR", "バウンディングボックス情報が不正です")
-            return
-        label_w = self.width()
-        label_h = self.height()
-        xs = [v["x"] for v in vertices]
-        ys = [v["y"] for v in vertices]
-        min_x = min(xs)
-        max_x = max(xs)
-        min_y = min(ys)
-        max_y = max(ys)
-        x = int(min_x * label_w)
-        y = int(min_y * label_h)
-        w = int((max_x - min_x) * label_w)
-        h = int((max_y - min_y) * label_h)
-        self.overlay_texts = []
-        # テキストボックスをOCRボックス範囲に合わせて重ねる
-        rect_orig = QRect(
-            int(x / self.scale_factor),
-            int(y / self.scale_factor),
-            int(w / self.scale_factor),
-            int(h / self.scale_factor),
-        )
-        self.overlay_texts.append(
-            (rect_orig, new_text, QFont(), Qt.AlignmentFlag.AlignCenter, QColor(255, 255, 255))
-        )
-        self.update()
-        # TODO: OCR JSONへの上書き保存処理を後続で実装 
 
     def mouseDoubleClickEvent(self, event):
         sel = self.selection.rect
