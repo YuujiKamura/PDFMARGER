@@ -44,6 +44,7 @@ class PDFThumbnailMerger(QMainWindow):
         self.setMenuBar(self.menu_bar)
         # --- 作業状態保存メニューのみ追加 ---
         self.menu_bar.addAction("作業状態を保存", self.save_edit_state)
+        self.menu_bar.addAction("作業状態をクリアして保存", self.clear_and_save_edit_state)
         # サムネイルグリッドビューア追加
         vlayout.addWidget(self.viewer)
         # 操作ボタン
@@ -160,6 +161,19 @@ class PDFThumbnailMerger(QMainWindow):
         except Exception as e:
             print(f"状態保存失敗: {e}")
             QMessageBox.warning(self, "エラー", "作業状態の保存に失敗しました")
+
+    def clear_and_save_edit_state(self):
+        """
+        作業状態をクリアしてから保存するメニューアクション
+        """
+        try:
+            self.viewer.page_items = []
+            self.viewer.clear()
+            self.viewer.save_state()
+            QMessageBox.information(self, "保存", "作業状態をクリアして保存しました")
+        except Exception as e:
+            print(f"状態クリア保存失敗: {e}")
+            QMessageBox.warning(self, "エラー", "作業状態のクリア保存に失敗しました")
 
 
 if __name__ == "__main__":

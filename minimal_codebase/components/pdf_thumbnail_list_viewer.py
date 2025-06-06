@@ -356,6 +356,70 @@ class PDFThumbnailListViewer(QListWidget):
         dlg.resize(800, 1000)
         dlg.exec()
 
+    def save_state(self, path=None):
+        """
+        現在のページ順序・選択状態をJSONで保存
+        """
+        import json
+        from PyQt6.QtWidgets import QFileDialog
+        if path is None:
+            path, _ = QFileDialog.getSaveFileName(self, "状態保存ファイル", "", "JSON Files (*.json)")
+            if not path:
+                return
+        state = {
+            "pages": [
+                {"pdf_path": info.pdf_path, "page_num": info.page_num}
+                for info, _ in getattr(self, "page_items", [])
+            ],
+            "selected": [i for i, (_, item) in enumerate(getattr(self, "page_items", [])) if item.isSelected()]
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+
+    def load_state(self, path=None):
+        """
+        保存されたページ順序・選択状態を復元
+        """
+        import json
+        from PyQt6.QtWidgets import QFileDialog
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(self, "状態ファイルを選択", "", "JSON Files (*.json)")
+            if not path:
+                return
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.clear()
+        self.page_items = []
+        for page in state.get("pages", []):
+            info = PDFPageInfo(pdf_path=page["pdf_path"], page_num=page["page_num"])
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, info)
+            item.setSizeHint(QSize(self.thumb_w + 180, self.thumb_h + 16))
+            widget = QWidget()
+            hbox = QHBoxLayout(widget)
+            label = QLabel()
+            label.setFixedSize(self.thumb_w, self.thumb_h)
+            hbox.addWidget(label)
+            text = QLabel(f"{os.path.basename(info.pdf_path)}\nページ{info.page_num+1}")
+            hbox.addWidget(text)
+            btn_up = QPushButton('↑')
+            btn_up.setFixedWidth(28)
+            btn_up.clicked.connect(lambda _, it=item: self.move_item(it, -1))
+            hbox.addWidget(btn_up)
+            btn_down = QPushButton('↓')
+            btn_down.setFixedWidth(28)
+            btn_down.clicked.connect(lambda _, it=item: self.move_item(it, 1))
+            hbox.addWidget(btn_down)
+            hbox.addStretch(1)
+            widget.setLayout(hbox)
+            self.addItem(item)
+            self.setItemWidget(item, widget)
+            self.page_items.append((info, item))
+        # 選択状態復元
+        for i in state.get("selected", []):
+            if 0 <= i < len(self.page_items):
+                self.page_items[i][1].setSelected(True)
+
     # ...（以降の関数は変わらずそのまま）...
     # move_item, create_item_widget, keyPressEvent, on_item_doubleclicked,
     # get_selected_pages, get_all_pages, reload_pages, contextMenuEvent,
