@@ -28,6 +28,7 @@ from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 import fitz
 import os
 import tempfile
+from .selection_box import SelectionBox
 
 class OcrWorkerSignals(QObject):
     finished = pyqtSignal(object, object)  # (pages_dict, error)
@@ -60,10 +61,7 @@ class PDFPreviewWidget(QWidget):
         self.overlay_texts = []
         self.scale_factor = 1.0
         # --- 矩形選択用 ---
-        self.selecting = False
-        self.selection_rect = QRect()
-        self.selection_start = QPoint()
-        self.selection_end = QPoint()
+        self.selection = SelectionBox()
         self.setMouseTracking(True)
         self._edit_box = None
         self._selected_overlay = None  # 選択中のテキストボックスindex
@@ -88,16 +86,7 @@ class PDFPreviewWidget(QWidget):
                 int(rect.height() * ratio),
             )
 
-        if self.selection_rect.isValid() and not self.selection_rect.isNull():
-            self.selection_rect = _scale_rect(self.selection_rect)
-            self.selection_start = QPoint(
-                int(self.selection_start.x() * ratio),
-                int(self.selection_start.y() * ratio),
-            )
-            self.selection_end = QPoint(
-                int(self.selection_end.x() * ratio),
-                int(self.selection_end.y() * ratio),
-            )
+        self.selection.scale(ratio)
         if self._edit_box:
             box_rect = _scale_rect(self._edit_box.geometry())
             self._edit_box.setGeometry(box_rect)
@@ -142,7 +131,7 @@ class PDFPreviewWidget(QWidget):
                     int(self.pixmap.height() * self.scale_factor),
                 )
                 self.overlay_texts = []
-                self.selection_rect = QRect()
+                self.selection = SelectionBox()
                 self.update()
                 
                 return True
@@ -225,11 +214,14 @@ class PDFPreviewWidget(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
         # 選択範囲描画
-        if self.selection_rect.isValid() and not self.selection_rect.isNull():
+        if self.selection.is_active():
             pen = QPen(QColor(0, 120, 255, 180), 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(self.selection_rect)
+            painter.drawRect(self.selection.rect)
+            for rc in self.selection._handle_rects().values():
+                painter.setBrush(QColor(0, 120, 255))
+                painter.drawRect(rc)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -248,10 +240,7 @@ class PDFPreviewWidget(QWidget):
                     self.update()
                     return
             self._selected_overlay = None
-            self.selecting = True
-            self.selection_start = event.pos()
-            self.selection_end = event.pos()
-            self.selection_rect = QRect(self.selection_start, self.selection_end)
+            self.selection.begin_action(event.pos())
             self.update()
         elif event.button() == Qt.MouseButton.RightButton:
             # テキストボックス選択中なら書体変更・削除メニュー
@@ -279,7 +268,7 @@ class PDFPreviewWidget(QWidget):
                 return
             # 通常の右クリックメニュー
             menu = QMenu(self)
-            if self.selection_rect.isValid() and not self.selection_rect.isNull():
+            if self.selection.is_active():
                 add_text_action = menu.addAction("テキスト追加（サイズ・書体指定）")
                 ocr_action = menu.addAction("選択範囲をOCRして上書き")
             zoom_menu = menu.addMenu("表示倍率")
@@ -290,7 +279,7 @@ class PDFPreviewWidget(QWidget):
             save_action = menu.addAction("PDFを上書き保存")
             saveas_action = menu.addAction("名前をつけて保存")
             action = menu.exec(self.mapToGlobal(event.pos()))
-            if self.selection_rect.isValid() and not self.selection_rect.isNull():
+            if self.selection.is_active():
                 if action == add_text_action:
                     self.add_text_box_to_selection()
                 elif action == ocr_action:
@@ -317,20 +306,18 @@ class PDFPreviewWidget(QWidget):
             self.overlay_texts[self._selected_overlay] = (new_rect, text, font, align)
             self.update()
             return
-        if self.selecting:
-            self.selection_end = event.pos()
-            self.selection_rect = QRect(self.selection_start, self.selection_end).normalized()
+        if self.selection.update_action(event.pos()):
             self.update()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.selecting = False
+            self.selection.end_action()
             self._drag_offset = QPoint()
             self.update()
 
     def ocr_selected_region(self):
         # 選択範囲の画像を切り出し
-        if not self.doc or not self.selection_rect.isValid() or self.selection_rect.isNull():
+        if not self.doc or not self.selection.is_active():
             QMessageBox.warning(self, "OCR", "有効な範囲が選択されていません")
             return
         # 現在ページの画像を取得
@@ -341,7 +328,7 @@ class PDFPreviewWidget(QWidget):
             label_geom = self.geometry()
             scale_x = pix.width / self.width()
             scale_y = pix.height / self.height()
-            sel = self.selection_rect
+            sel = self.selection.rect
             x = int((sel.left() - label_geom.left()) * scale_x)
             y = int((sel.top() - label_geom.top()) * scale_y)
             w = int(sel.width() * scale_x)
@@ -423,7 +410,7 @@ class PDFPreviewWidget(QWidget):
         # TODO: OCR JSONへの上書き保存処理を後続で実装 
 
     def mouseDoubleClickEvent(self, event):
-        sel = self.selection_rect
+        sel = self.selection.rect
         if sel.isNull() or not sel.isValid():
             return
         if self._edit_box:
@@ -456,7 +443,7 @@ class PDFPreviewWidget(QWidget):
         self.update()
 
     def add_text_box_to_selection(self):
-        sel = self.selection_rect
+        sel = self.selection.rect
         if sel.isNull() or not sel.isValid():
             return
         # フォント選択ダイアログ
