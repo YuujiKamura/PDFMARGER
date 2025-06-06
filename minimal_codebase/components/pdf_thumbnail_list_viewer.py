@@ -428,11 +428,19 @@ class PDFThumbnailListViewer(QListWidget):
             if 0 <= i < len(self.page_items):
                 self.page_items[i][1].setSelected(True)
 
-    # ...（以降の関数は変わらずそのまま）...
-    # move_item, create_item_widget, keyPressEvent, on_item_doubleclicked,
-    # get_selected_pages, get_all_pages, reload_pages, contextMenuEvent,
-    # replace_pdf_at_item, insert_pdf_at_item, save_state, load_state
-    # ※これらは元の内容でOK（本質的な衝突は上記部分のみ）
+    def move_item(self, item, direction):
+        """
+        指定したitemをdirection（-1:上, 1:下）に移動する
+        """
+        row = self.row(item)
+        new_row = row + direction
+        if 0 <= new_row < self.count():
+            self.takeItem(row)
+            self.insertItem(new_row, item)
+            self.setCurrentRow(new_row)
+            # page_itemsの順序も同期
+            info_item = self.page_items.pop(row)
+            self.page_items.insert(new_row, info_item)
 
     def paintEvent(self, event):
         super().paintEvent(event)
