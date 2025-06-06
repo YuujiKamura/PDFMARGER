@@ -83,7 +83,7 @@ class PDFThumbnailMerger(QMainWindow):
             else:
                 self.viewer.pdf_dir = folder
                 self.viewer.pdf_files = [
-                    os.path.join(folder, f)
+                    f
                     for f in os.listdir(folder)
                     if f.lower().endswith('.pdf')
                 ]
