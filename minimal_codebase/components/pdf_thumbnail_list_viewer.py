@@ -76,7 +76,11 @@ class PDFListLoadWorker(QRunnable):
     def run(self):
         result = []
         for pdf_file in self.pdf_files:
-            pdf_path = os.path.join(self.pdf_dir, pdf_file)
+            pdf_path = (
+                pdf_file
+                if os.path.isabs(pdf_file)
+                else os.path.join(self.pdf_dir, pdf_file)
+            )
             try:
                 import fitz
                 doc = fitz.open(pdf_path)
@@ -86,6 +90,53 @@ class PDFListLoadWorker(QRunnable):
             except Exception as e:
                 print(f"{pdf_file} 読み込み失敗: {e}")
         self.signals.finished.emit(result)
+
+    # --- 従来の一括ロードも保持 ---
+    def load_all_pages(self):
+        self.clear()
+        self.page_items = []
+        if not self.pdf_files and self.pdf_dir:
+            self.pdf_files = [f for f in os.listdir(self.pdf_dir) if f.lower().endswith('.pdf')]
+        for pdf_file in self.pdf_files:
+            pdf_path = (
+                pdf_file
+                if os.path.isabs(pdf_file)
+                else os.path.join(self.pdf_dir, pdf_file)
+            )
+            try:
+                import fitz
+                doc = fitz.open(pdf_path)
+                for i in range(len(doc)):
+                    info = PDFPageInfo(pdf_path=pdf_path, page_num=i)
+                    item = QListWidgetItem()
+                    item.setData(Qt.ItemDataRole.UserRole, info)
+                    item.setSizeHint(QSize(self.thumb_w + 180, self.thumb_h + 16))
+                    pixmap = self.get_thumbnail(pdf_path, i, self.on_thumbnail_ready)
+                    widget = QWidget()
+                    hbox = QHBoxLayout(widget)
+                    label = QLabel()
+                    if pixmap:
+                        label.setPixmap(pixmap)
+                    label.setFixedSize(self.thumb_w, self.thumb_h)
+                    hbox.addWidget(label)
+                    text = QLabel(f"{os.path.basename(pdf_path)}\nページ{i+1}")
+                    hbox.addWidget(text)
+                    btn_up = QPushButton('↑')
+                    btn_up.setFixedWidth(28)
+                    btn_up.clicked.connect(lambda _, it=item: self.move_item(it, -1))
+                    hbox.addWidget(btn_up)
+                    btn_down = QPushButton('↓')
+                    btn_down.setFixedWidth(28)
+                    btn_down.clicked.connect(lambda _, it=item: self.move_item(it, 1))
+                    hbox.addWidget(btn_down)
+                    hbox.addStretch(1)
+                    widget.setLayout(hbox)
+                    self.addItem(item)
+                    self.setItemWidget(item, widget)
+                    self.page_items.append((info, item))
+                doc.close()
+            except Exception as e:
+                print(f"{pdf_file} 読み込み失敗: {e}")
 
 class PDFThumbnailListViewer(QListWidget):
     pdf_list_loaded = pyqtSignal(list)  # [(pdf_path, page_num)]
@@ -295,49 +346,6 @@ class PDFThumbnailListViewer(QListWidget):
                 continue
             self._thumbnail_requested.add(key)
             self.get_thumbnail(info.pdf_path, info.page_num, self.on_thumbnail_ready)
-
-    # --- 従来の一括ロードも保持 ---
-    def load_all_pages(self):
-        self.clear()
-        self.page_items = []
-        if not self.pdf_files and self.pdf_dir:
-            self.pdf_files = [f for f in os.listdir(self.pdf_dir) if f.lower().endswith('.pdf')]
-        for pdf_file in self.pdf_files:
-            pdf_path = os.path.join(self.pdf_dir, pdf_file)
-            try:
-                import fitz
-                doc = fitz.open(pdf_path)
-                for i in range(len(doc)):
-                    info = PDFPageInfo(pdf_path=pdf_path, page_num=i)
-                    item = QListWidgetItem()
-                    item.setData(Qt.ItemDataRole.UserRole, info)
-                    item.setSizeHint(QSize(self.thumb_w + 180, self.thumb_h + 16))
-                    pixmap = self.get_thumbnail(pdf_path, i, self.on_thumbnail_ready)
-                    widget = QWidget()
-                    hbox = QHBoxLayout(widget)
-                    label = QLabel()
-                    if pixmap:
-                        label.setPixmap(pixmap)
-                    label.setFixedSize(self.thumb_w, self.thumb_h)
-                    hbox.addWidget(label)
-                    text = QLabel(f"{os.path.basename(pdf_path)}\nページ{i+1}")
-                    hbox.addWidget(text)
-                    btn_up = QPushButton('↑')
-                    btn_up.setFixedWidth(28)
-                    btn_up.clicked.connect(lambda _, it=item: self.move_item(it, -1))
-                    hbox.addWidget(btn_up)
-                    btn_down = QPushButton('↓')
-                    btn_down.setFixedWidth(28)
-                    btn_down.clicked.connect(lambda _, it=item: self.move_item(it, 1))
-                    hbox.addWidget(btn_down)
-                    hbox.addStretch(1)
-                    widget.setLayout(hbox)
-                    self.addItem(item)
-                    self.setItemWidget(item, widget)
-                    self.page_items.append((info, item))
-                doc.close()
-            except Exception as e:
-                print(f"{pdf_file} 読み込み失敗: {e}")
 
     def on_item_doubleclicked(self, item):
         """

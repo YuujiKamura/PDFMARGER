@@ -60,71 +60,63 @@ class PDFThumbnailMerger(QMainWindow):
     def on_files_opened(self, files):
         state_path = get_appdata_path("last_pdf_edit_state.json")
         try:
-            if os.path.exists(state_path):
-                self.viewer.load_state(state_path)
-            else:
-                self.viewer.pdf_files = [os.path.abspath(f) for f in files]
-                self.viewer.pdf_dir = (
-                    os.path.dirname(self.viewer.pdf_files[0])
-                    if self.viewer.pdf_files else None
-                )
-                if self.viewer.pdf_dir:
-                    save_last_dir(self.viewer.pdf_dir)
-                self.viewer.load_all_pages_async()
+            self.viewer.pdf_files = [os.path.abspath(f) for f in files]
+            self.viewer.pdf_dir = (
+                os.path.dirname(self.viewer.pdf_files[0])
+                if self.viewer.pdf_files else None
+            )
+            if self.viewer.pdf_dir:
+                save_last_dir(self.viewer.pdf_dir)
+            self.viewer.load_all_pages_async()
         except Exception as e:
             print(f"状態ファイル読込失敗: {e}")
+            print(f"PDFファイル読込失敗: {e}")
             self.viewer.load_all_pages_async()
 
     def on_folder_opened(self, folder):
         state_path = get_appdata_path("last_pdf_edit_state.json")
         try:
-            if os.path.exists(state_path):
-                self.viewer.load_state(state_path)
-            else:
-                self.viewer.pdf_dir = folder
-                self.viewer.pdf_files = [
-                    f
-                    for f in os.listdir(folder)
-                    if f.lower().endswith('.pdf')
-                ]
-                if folder:
-                    save_last_dir(folder)
-                self.viewer.load_all_pages_async()
+            self.viewer.pdf_dir = folder
+            self.viewer.pdf_files = [
+                f
+                for f in os.listdir(folder)
+                if f.lower().endswith(".pdf")
+            ]
+            if folder:
+                save_last_dir(folder)
+            self.viewer.load_all_pages_async()
         except Exception as e:
             print(f"状態ファイル読込失敗: {e}")
+            print(f"フォルダ読込失敗: {e}")
             self.viewer.load_all_pages_async()
 
     def on_files_added(self, files):
         state_path = get_appdata_path("last_pdf_edit_state.json")
         try:
-            if os.path.exists(state_path):
-                self.viewer.load_state(state_path)
-            else:
-                self.viewer.pdf_files.extend([os.path.abspath(f) for f in files])
-                if files:
-                    save_last_dir(os.path.dirname(files[0]))
-                self.viewer.load_all_pages_async()
+            self.viewer.pdf_files.extend([os.path.abspath(f) for f in files])
+            if files:
+                save_last_dir(os.path.dirname(files[0]))
+            self.viewer.load_all_pages_async()
         except Exception as e:
             print(f"状態ファイル読込失敗: {e}")
+            print(f"PDFファイル追加失敗: {e}")
             self.viewer.load_all_pages_async()
 
     def on_folder_added(self, folder):
         state_path = get_appdata_path("last_pdf_edit_state.json")
         try:
-            if os.path.exists(state_path):
-                self.viewer.load_state(state_path)
-            else:
-                new_files = [
-                    os.path.join(folder, f)
-                    for f in os.listdir(folder)
-                    if f.lower().endswith('.pdf')
-                ]
-                self.viewer.pdf_files.extend(new_files)
-                if folder:
-                    save_last_dir(folder)
-                self.viewer.load_all_pages_async()
+            new_files = [
+                os.path.join(folder, f)
+                for f in os.listdir(folder)
+                if f.lower().endswith(".pdf")
+            ]
+            self.viewer.pdf_files.extend(new_files)
+            if folder:
+                save_last_dir(folder)
+            self.viewer.load_all_pages_async()
         except Exception as e:
             print(f"状態ファイル読込失敗: {e}")
+            print(f"フォルダ追加失敗: {e}")
             self.viewer.load_all_pages_async()
 
     def merge_selected_pages(self):
