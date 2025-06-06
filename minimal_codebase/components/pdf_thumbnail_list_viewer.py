@@ -339,6 +339,23 @@ class PDFThumbnailListViewer(QListWidget):
             except Exception as e:
                 print(f"{pdf_file} 読み込み失敗: {e}")
 
+    def on_item_doubleclicked(self, item):
+        """
+        ダブルクリック時の動作: 選択したPDFページをプレビュー表示
+        """
+        info = item.data(Qt.ItemDataRole.UserRole)
+        if info is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"プレビュー: {os.path.basename(info.pdf_path)} ページ{info.page_num+1}")
+        vbox = QVBoxLayout(dlg)
+        preview = PDFPreviewWidget(dlg)
+        preview.set_pdf(info.pdf_path)
+        vbox.addWidget(preview)
+        dlg.setLayout(vbox)
+        dlg.resize(800, 1000)
+        dlg.exec()
+
     # ...（以降の関数は変わらずそのまま）...
     # move_item, create_item_widget, keyPressEvent, on_item_doubleclicked,
     # get_selected_pages, get_all_pages, reload_pages, contextMenuEvent,
