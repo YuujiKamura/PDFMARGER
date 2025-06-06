@@ -13,7 +13,16 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QApplication,
 )
-from PyQt6.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
+from PyQt6.QtCore import (
+    Qt,
+    QSize,
+    QThreadPool,
+    QRunnable,
+    pyqtSignal,
+    QObject,
+    QTimer,
+    QPoint,
+)
 import os
 import pprint
 import json
@@ -113,10 +122,15 @@ class PDFThumbnailListViewer(QListWidget):
         self.pdf_list_loaded.connect(self._on_pdf_list_loaded)
         self._workers = []  # ThumbnailWorkerの参照保持用
         self._signals = []  # signalsの参照保持用
+        self._pdf_page_iter = None  # incremental loading iterator
+        self._thumbnail_requested = set()  # avoid duplicate loads
+        self._initial_load_rows = 0
         # ローディングアニメーションウィジェット
         self.loading_widget = LoadingAnimationWidget("サムネイルを読み込み中...", parent=self)
         self.loading_widget.setFixedSize(200, 120)
         self.loading_widget.hide()
+        # trigger lazy thumbnail loading on scroll
+        self.verticalScrollBar().valueChanged.connect(self._load_visible_thumbnails)
 
     def get_thumbnail(self, pdf_path, page_num, callback=None):
         key = (pdf_path, page_num)
@@ -157,6 +171,7 @@ class PDFThumbnailListViewer(QListWidget):
 
     def on_thumbnail_ready(self, pdf_path, page_num, image):
         key = (pdf_path, page_num)
+        self._thumbnail_requested.discard(key)
         if image is not None:
             from PyQt6.QtGui import QPixmap
             pixmap = QPixmap.fromImage(image).scaled(
@@ -205,12 +220,40 @@ class PDFThumbnailListViewer(QListWidget):
     def _on_pdf_list_loaded(self, pdf_page_list):
         self.clear()
         self.page_items = []
-        for idx, (pdf_path, page_num) in enumerate(pdf_page_list):
+        self._pdf_page_iter = iter(pdf_page_list)
+        self._initial_load_rows = self._visible_row_threshold()
+        self._process_page_batch()
+
+    def _visible_row_threshold(self) -> int:
+        row_h = self.thumb_h + 16 + self.spacing()
+        if row_h <= 0:
+            return 0
+        rows = max(1, self.viewport().height() // row_h)
+        return rows * 2
+
+    def _process_page_batch(self, batch_size: int = 10):
+        """Process a small batch of pages to keep UI responsive."""
+        if self._pdf_page_iter is None:
+            return
+        for _ in range(batch_size):
+            try:
+                pdf_path, page_num = next(self._pdf_page_iter)
+            except StopIteration:
+                self._pdf_page_iter = None
+                self.hide_loading()
+                return
             info = PDFPageInfo(pdf_path=pdf_path, page_num=page_num)
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, info)
             item.setSizeHint(QSize(self.thumb_w + 180, self.thumb_h + 16))
-            pixmap = self.get_thumbnail(pdf_path, page_num, self.on_thumbnail_ready)
+            # only load thumbnails for items near the top to speed up initial display
+            row_index = self.count()
+            if row_index < getattr(self, "_initial_load_rows", 0):
+                key = (pdf_path, page_num)
+                self._thumbnail_requested.add(key)
+                pixmap = self.get_thumbnail(pdf_path, page_num, self.on_thumbnail_ready)
+            else:
+                pixmap = None
             widget = QWidget()
             hbox = QHBoxLayout(widget)
             label = QLabel()
@@ -233,9 +276,32 @@ class PDFThumbnailListViewer(QListWidget):
             self.addItem(item)
             self.setItemWidget(item, widget)
             self.page_items.append((info, item))
-            if idx % 10 == 0:
-                QApplication.processEvents()
-        self.hide_loading()
+        QApplication.processEvents()
+        self._load_visible_thumbnails()
+        QTimer.singleShot(0, self._process_page_batch)
+
+    def _load_visible_thumbnails(self):
+        """Load thumbnails for items that are currently visible."""
+        if not self.page_items:
+            return
+        vh = self.viewport().height()
+        row_h = self.thumb_h + 16 + self.spacing()
+        rows = max(1, vh // row_h)
+        top_index = self.indexAt(QPoint(0, 0)).row()
+        if top_index == -1:
+            top_index = 0
+        bottom_index = self.indexAt(QPoint(0, vh - 1)).row()
+        if bottom_index == -1:
+            bottom_index = self.count() - 1
+        start = max(0, top_index - rows)
+        end = min(self.count() - 1, bottom_index + rows)
+        for row in range(start, end + 1):
+            info, item = self.page_items[row]
+            key = (info.pdf_path, info.page_num)
+            if key in self.thumbnail_cache or key in self._thumbnail_requested:
+                continue
+            self._thumbnail_requested.add(key)
+            self.get_thumbnail(info.pdf_path, info.page_num, self.on_thumbnail_ready)
 
     def load_all_pages(self):
         self.clear()
