@@ -53,7 +53,7 @@ class OverlayEditorMixin:
             int(rect.height() / self.scale_factor),
         )
         self.overlay_texts.append(
-            (rect_orig, text, edit.font(), edit.alignment(), QColor(255, 255, 255))
+            (rect_orig, text, edit.font(), edit.alignment(), QColor(0, 0, 0, 0))
         )
         edit.deleteLater()
         self._edit_box = None
@@ -101,10 +101,13 @@ class OverlayEditorMixin:
         else:
             align = align_map.get(align_txt, Qt.AlignmentFlag.AlignCenter)
         color = QColorDialog.getColor(
-            QColor(255, 255, 255), self, "背景色を選択", QColorDialog.ColorDialogOption.ShowAlphaChannel
+            QColor(255, 255, 255, 0),
+            self,
+            "背景色を選択",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )
         if not color.isValid():
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         self.overlay_texts.append((rect, text, font, align, color))
         self.update()
 
@@ -114,11 +117,11 @@ class OverlayEditorMixin:
             rect, text, font, align, color = item
         elif len(item) == 4:
             rect, text, font, align = item
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         else:
             rect, text, font = item
             align = Qt.AlignmentFlag.AlignCenter
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         new_font, ok = QFontDialog.getFont(font, self, "書体とサイズを変更")
         if not ok:
             return
@@ -153,7 +156,7 @@ class OverlayEditorMixin:
             QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )
         if not color.isValid():
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         self.overlay_texts[idx] = (new_rect, text, new_font, align, color)
         self.update()
 
@@ -163,14 +166,14 @@ class OverlayEditorMixin:
             rect, text, font, _, color = item
         elif len(item) == 4:
             rect, text, font, _ = item
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         elif len(item) == 3:
             rect, text, font = item
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         else:
             rect, text = item
             font = QFont()
-            color = QColor(255, 255, 255)
+            color = QColor(0, 0, 0, 0)
         self.overlay_texts[idx] = (rect, text, font, align, color)
         self.update()
 
@@ -185,20 +188,21 @@ class OverlayEditorMixin:
                 rect, text, font, align, color = item
             elif len(item) == 4:
                 rect, text, font, align = item
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             elif len(item) == 3:
                 rect, text, font = item
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             else:
                 rect, text = item
                 font = painter.font()
                 font.setPointSize(16)
                 align = Qt.AlignmentFlag.AlignCenter
-                color = QColor(255, 255, 255)
+                color = QColor(0, 0, 0, 0)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(color)
-            painter.drawRect(rect)
+            if color.alpha() > 0:
+                painter.setBrush(color)
+                painter.drawRect(rect)
             painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setFont(font)
             painter.drawText(rect, align, text)
