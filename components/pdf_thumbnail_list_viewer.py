@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QVBoxLayout,
+    QScrollArea,
     QMessageBox,
     QWidget,
     QHBoxLayout,
@@ -355,11 +356,16 @@ class PDFThumbnailListViewer(QListWidget):
         if info is None:
             return
         dlg = QDialog(self)
-        dlg.setWindowTitle(f"プレビュー: {os.path.basename(info.pdf_path)} ページ{info.page_num+1}")
+        dlg.setWindowTitle(
+            f"プレビュー: {os.path.basename(info.pdf_path)} ページ{info.page_num+1}"
+        )
         vbox = QVBoxLayout(dlg)
-        preview = PDFPreviewWidget(dlg)
+        scroll = QScrollArea(dlg)
+        preview = PDFPreviewWidget(scroll)
         preview.set_pdf(info.pdf_path)
-        vbox.addWidget(preview)
+        scroll.setWidget(preview)
+        scroll.setWidgetResizable(True)
+        vbox.addWidget(scroll)
         dlg.setLayout(vbox)
         dlg.resize(800, 1000)
         dlg.exec()

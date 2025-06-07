@@ -1,0 +1,10 @@
+import sys
+import os
+from pathlib import Path
+
+# Add the repository root to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from components.pdf_thumbnail_merger import PDFThumbnailMerger
+
+__all__ = ["PDFThumbnailMerger"]
