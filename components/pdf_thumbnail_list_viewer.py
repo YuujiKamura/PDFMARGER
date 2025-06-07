@@ -435,8 +435,14 @@ class PDFThumbnailListViewer(QListWidget):
         row = self.row(item)
         new_row = row + direction
         if 0 <= new_row < self.count():
+            # takeItem()でwidgetが破棄されるのを防ぐため一旦取り出す
+            widget = self.itemWidget(item)
+            if widget is not None:
+                self.removeItemWidget(item)
             self.takeItem(row)
             self.insertItem(new_row, item)
+            if widget is not None:
+                self.setItemWidget(item, widget)
             self.setCurrentRow(new_row)
             # page_itemsの順序も同期
             info_item = self.page_items.pop(row)
